@@ -1,0 +1,73 @@
+name: V2Ray Server with Ngrok (Final Attempt)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup V2Ray and Ngrok
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          # Print the first 5 characters of the token to check if it's being read
+          echo "Token read by script starts with: $(echo $NGROK_AUTH_TOKEN | cut -c1-5)"
+
+          # Download and prepare V2Ray
+          wget -O v2ray.zip https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-linux-64.zip
+          unzip v2ray.zip
+          chmod +x v2ray
+
+          # Download and prepare Ngrok
+          wget -O ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
+          unzip ngrok.zip
+          chmod +x ngrok
+          
+          # Create V2Ray config file for WebSocket
+          UUID=$(cat /proc/sys/kernel/random/uuid)
+          cat > config.json <<EOF
+          {
+            "inbounds": [{
+              "port": 8080,
+              "protocol": "vmess",
+              "settings": { "clients": [{ "id": "$UUID", "alterId": 0 }] },
+              "streamSettings": { "network": "ws", "wsSettings": { "path": "/" } }
+            }],
+            "outbounds": [{"protocol": "freedom"}]
+          }
+          EOF
+          
+          echo "USER_UUID=$UUID" >> $GITHUB_ENV
+
+      - name: Start Services and Get Info
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          # Start V2Ray in the background
+          ./v2ray -config=config.json &
+          
+          # Configure and start Ngrok tunnel in the background
+          ./ngrok authtoken $NGROK_AUTH_TOKEN
+          ./ngrok http 8080 &
+          
+          # Wait for Ngrok to initialize
+          sleep 10
+          
+          # Get connection info
+          NGROK_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels)
+          PUBLIC_URL=$(echo $NGROK_INFO | grep -o 'https://[^"]*')
+          
+          echo "V2Ray server is running!"
+          echo "========================================"
+          echo "آدرس (Address): ${PUBLIC_URL#https://}"
+          echo "پورت (Port): 443"
+          echo "یوزر آیدی (UUID): ${{ env.USER_UUID }}"
+          echo "آلتر آیدی (AlterId): 0"
+          echo "انتقال (Network): ws"
+          echo "Path (مسیر): /"
+          echo "TLS: فعال (tls)"
+          echo "========================================"
+          
+      - name: Keep Workflow Alive
+        run: sleep 21000
